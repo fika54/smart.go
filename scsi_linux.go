@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"runtime"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -203,6 +204,11 @@ func scsiSendCdb(fd int, cdb []byte, respBuf []byte) error {
 func scsiSendCdbSense(fd int, cdb []byte, respBuf []byte) ([]byte, error) {
 	senseBuf := make([]byte, _scsiSenseBufSize)
 
+	// The addresses of cdb and respBuf are passed to the kernel as integers
+	// inside the sg_io_hdr struct. Keep the buffers reachable until the ioctl has completed.
+	defer runtime.KeepAlive(cdb)
+	defer runtime.KeepAlive(respBuf)
+
 	// A nil (or empty) respBuf means the command transfers no data (e.g. ATA
 	// CHECK POWER MODE). In that case use SG_DXFER_NONE with a NULL data
 	// pointer, as required for non-data commands by the sg driver.
@@ -239,7 +245,7 @@ func scsiSendCdbSense(fd int, cdb []byte, respBuf []byte) ([]byte, error) {
 		sbp:            uintptr(unsafe.Pointer(&senseBuf[0])),
 	}
 
-	if err := ioctl(uintptr(fd), _SG_IO, uintptr(unsafe.Pointer(&hdr))); err != nil {
+	if err := ioctl(uintptr(fd), _SG_IO, unsafe.Pointer(&hdr)); err != nil {
 		return nil, err
 	}
 

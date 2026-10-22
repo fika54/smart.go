@@ -1,6 +1,8 @@
 package smart
 
 import (
+	"unsafe"
+
 	"golang.org/x/sys/unix"
 )
 
@@ -52,9 +54,14 @@ func iowr(t, nr, size uintptr) uintptr {
 	return ioc(directionWrite|directionRead, t, nr, size)
 }
 
-// ioctl executes an ioctl command on the specified file descriptor
-func ioctl(fd, cmd, ptr uintptr) error {
-	_, _, errno := unix.Syscall(unix.SYS_IOCTL, fd, cmd, ptr)
+// ioctl executes an ioctl command on the specified file descriptor.
+//
+// ptr is an unsafe.Pointer (not a uintptr) on purpose: it is converted to uintptr
+// inside the unix.Syscall call expression, which is the only form where the compiler
+// keeps the pointed-to object alive and valid for the duration of the call
+// (see rule (4) of the unsafe.Pointer documentation).
+func ioctl(fd, cmd uintptr, ptr unsafe.Pointer) error {
+	_, _, errno := unix.Syscall(unix.SYS_IOCTL, fd, cmd, uintptr(ptr))
 	if errno != 0 {
 		return errno
 	}

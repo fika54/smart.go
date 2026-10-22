@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"runtime"
 	"syscall"
 	"unsafe"
 
@@ -107,6 +108,10 @@ func nvmeReadLogPage(fd int, logID uint8, buf []byte) error {
 		return fmt.Errorf("invalid buffer size")
 	}
 
+	// The address of buf is passed to the kernel as an integer inside the command struct.
+	// Keep the buffer reachable until the ioctl has completed.
+	defer runtime.KeepAlive(buf)
+
 	cmd64 := nvmePassthruCmd64{
 		opcode:  nvmeAdminGetLogPage,
 		nsid:    0xffffffff, // controller-level SMART info
@@ -118,7 +123,7 @@ func nvmeReadLogPage(fd int, logID uint8, buf []byte) error {
 
 	// ENOTTY means the ioctl number is not recognised by the kernel (64-bit struct
 	// not supported), so fall back to the older 32-bit passthrough command.
-	err := ioctl(uintptr(fd), nvmeIoctlAdmin64Cmd, uintptr(unsafe.Pointer(&cmd64)))
+	err := ioctl(uintptr(fd), nvmeIoctlAdmin64Cmd, unsafe.Pointer(&cmd64))
 	if err != syscall.ENOTTY {
 		return err
 	}
@@ -132,10 +137,14 @@ func nvmeReadLogPage(fd int, logID uint8, buf []byte) error {
 		cdw10:   uint32(logID) | (((uint32(bufLen) / 4) - 1) << 16),
 	}
 
-	return ioctl(uintptr(fd), nvmeIoctlAdminCmd, uintptr(unsafe.Pointer(&cmd)))
+	return ioctl(uintptr(fd), nvmeIoctlAdminCmd, unsafe.Pointer(&cmd))
 }
 
 func (d *NVMeDevice) readIdentifyData(nsid, cns int, data []byte) error {
+	// The address of data is passed to the kernel as an integer inside the command struct.
+	// Keep the buffer reachable until the ioctl has completed.
+	defer runtime.KeepAlive(data)
+
 	cmd64 := nvmePassthruCmd64{
 		opcode:  nvmeAdminIdentify,
 		nsid:    uint32(nsid),
@@ -145,7 +154,7 @@ func (d *NVMeDevice) readIdentifyData(nsid, cns int, data []byte) error {
 	}
 
 	// ENOTTY means the 64-bit ioctl is not supported; fall back to 32-bit struct.
-	err := ioctl(uintptr(d.fd), nvmeIoctlAdmin64Cmd, uintptr(unsafe.Pointer(&cmd64)))
+	err := ioctl(uintptr(d.fd), nvmeIoctlAdmin64Cmd, unsafe.Pointer(&cmd64))
 	if err != syscall.ENOTTY {
 		return err
 	}
@@ -159,7 +168,7 @@ func (d *NVMeDevice) readIdentifyData(nsid, cns int, data []byte) error {
 		cdw10:   uint32(cns),
 	}
 
-	return ioctl(uintptr(d.fd), nvmeIoctlAdminCmd, uintptr(unsafe.Pointer(&cmd)))
+	return ioctl(uintptr(d.fd), nvmeIoctlAdminCmd, unsafe.Pointer(&cmd))
 }
 
 func (d *NVMeDevice) readControllerIdentifyData() (*NvmeIdentController, error) {
