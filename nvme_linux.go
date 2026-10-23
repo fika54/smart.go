@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"runtime"
 	"syscall"
 	"unsafe"
 
@@ -89,7 +88,7 @@ func (d *NVMeDevice) Close() error {
 }
 
 func (d *NVMeDevice) ReadSMART() (*NvmeSMARTLog, error) {
-	buf := make([]byte, 512)
+	buf := heapBytes(512)
 	if err := nvmeReadLogPage(d.fd, nvmeLogSmartInformation, buf); err != nil {
 		return nil, err
 	}
@@ -101,16 +100,15 @@ func (d *NVMeDevice) ReadSMART() (*NvmeSMARTLog, error) {
 	return &sl, nil
 }
 
+// nvmeReadLogPage reads a log page into buf.
+// The address of buf is stored as an integer in the command struct, so buf must be heap
+// allocated (see heapBytes) and must stay in use until this function returns.
 func nvmeReadLogPage(fd int, logID uint8, buf []byte) error {
 	bufLen := len(buf)
 
 	if (bufLen < 4) || (bufLen > 0x4000) || (bufLen%4 != 0) {
 		return fmt.Errorf("invalid buffer size")
 	}
-
-	// The address of buf is passed to the kernel as an integer inside the command struct.
-	// Keep the buffer reachable until the ioctl has completed.
-	defer runtime.KeepAlive(buf)
 
 	cmd64 := nvmePassthruCmd64{
 		opcode:  nvmeAdminGetLogPage,
@@ -140,11 +138,10 @@ func nvmeReadLogPage(fd int, logID uint8, buf []byte) error {
 	return ioctl(uintptr(fd), nvmeIoctlAdminCmd, unsafe.Pointer(&cmd))
 }
 
+// readIdentifyData reads identify data into data.
+// The address of data is stored as an integer in the command struct, so data must be heap
+// allocated (see heapBytes) and must stay in use until this function returns.
 func (d *NVMeDevice) readIdentifyData(nsid, cns int, data []byte) error {
-	// The address of data is passed to the kernel as an integer inside the command struct.
-	// Keep the buffer reachable until the ioctl has completed.
-	defer runtime.KeepAlive(data)
-
 	cmd64 := nvmePassthruCmd64{
 		opcode:  nvmeAdminIdentify,
 		nsid:    uint32(nsid),
@@ -172,7 +169,7 @@ func (d *NVMeDevice) readIdentifyData(nsid, cns int, data []byte) error {
 }
 
 func (d *NVMeDevice) readControllerIdentifyData() (*NvmeIdentController, error) {
-	buf := make([]byte, 4096)
+	buf := heapBytes(4096)
 	if err := d.readIdentifyData(0, 1, buf); err != nil {
 		return nil, err
 	}
@@ -185,7 +182,7 @@ func (d *NVMeDevice) readControllerIdentifyData() (*NvmeIdentController, error) 
 }
 
 func (d *NVMeDevice) readNamespaceIdentifyData(nsid int) (*NvmeIdentNamespace, error) {
-	buf := make([]byte, 4096)
+	buf := heapBytes(4096)
 	if err := d.readIdentifyData(nsid, 0, buf); err != nil {
 		return nil, err
 	}
